@@ -8,18 +8,283 @@ output:
 
 ## Loading and preprocessing the data
 
+### Code to Load the data
+
+- Directory was '/tmp/RepData_PeerAssessment1-master/'
+- File was 'activity.csv'
+- There was no transforming of the data at this time.
+
+```{r}
+setwd('/tmp/RepData_PeerAssessment1-master/')
+data.file = 'activity.csv'
+data.df = read.csv(file = data.file, header = TRUE)
+```
+
+### Histogram
+```{r}
+dates.v = unique(data.df[["date"]])
+
+totals.na.rm.v = c()
+
+for (current.date in dates.v){
+    current.data = subset(data.df, (date == current.date) & (!is.na(steps)))
+    
+    if (nrow(current.data) > 0){
+        total.na.rm = sum(current.data[["steps"]], na.rm = TRUE)
+        totals.na.rm.v = c(totals.na.rm.v, total.na.rm)
+    }
+}
+
+breaks.v = seq(from = 0, to = 22000, by = 1000)
+
+hist(totals.na.rm.v, breaks = breaks.v,
+     main = "Histogram of daily total steps (na.rm = TRUE)",
+     xlab = "Total daily steps",
+     ylab = "Number of Days", las = 1)
+```
+
 
 
 ## What is mean total number of steps taken per day?
+
+```{r}
+cat("Analysis of days, ignoring NA intervals\n",
+    sprintf("%11i", length(dates.v)),	
+    " : 'raw' number of days in the data set\n", 
+    sprintf("%11i", length(totals.na.rm.v)), 
+    " : 'filtered' number of days (removed empty ",
+    "days with no observations)\n",
+    sprintf("%0.5f", mean(totals.na.rm.v)),
+    " : (Filtered) Mean daily total\n",
+    sprintf("%11i", median(totals.na.rm.v)),
+    " : (Filtered) Median daily total\n", sep = '')    
+```
+
+
 
 
 
 ## What is the average daily activity pattern?
 
+### Time series plot of the intervals and the average steps per interval
+
+```{r}
+library(hash)
+
+convert.int__hh_mm = function(time.integer){
+    if (time.integer < 100){
+        time.string = paste("00:", time.integer, sep = '')
+    } else {
+        time.string = paste((time.integer %/% 100), ":",
+            (time.integer %% 100), sep = "")
+    }
+    return(time.string)
+}
+
+intervals.v = unique(sort(data.df[["interval"]]))
+
+daily.intervals.df = data.frame(interval.time.seconds = c(),
+    average.steps = c())
+
+row.counter = 0
+
+max.average.steps = -1
+argmax.interval   = NA
+
+hash.interval.to.average = hash()
+
+for (current.interval in intervals.v){
+    row.counter = row.counter + 1
+    current.df = subset(data.df,
+        (interval == current.interval) & (!is.na(steps)))
+
+    if (nrow(current.df) > 0){
+        average.steps = mean(current.df[["steps"]])
+    } else {
+        average.steps = NA
+    }
+
+    hash.interval.to.average[[as.character(current.interval)]] = average.steps
+    
+    if (!is.na(average.steps)){
+        if (average.steps > max.average.steps){
+            max.average.steps = average.steps
+            argmax.interval = current.interval
+        }
+    }
+        
+    time.string = convert.int__hh_mm(current.interval)
+        
+    ## if (current.interval < 100){
+    ##    time.string = paste("00:", current.interval, sep = '')
+    ## } else {
+    ##    time.string = paste((current.interval %/% 100), ":",
+    ##        (current.interval %% 100), sep = "")
+    ## }
+
+    daily.intervals.df[row.counter, "interval.time.seconds"] =
+        as.integer(as.POSIXct(paste("1970-01-01", time.string, sep = ''),
+                              "%Y-%m-%d %H:%M"))
+
+    daily.intervals.df[row.counter, "average.steps"] = average.steps
+        
+}
+
+
+
+x.axis.tick.times = c("04:00", "08:00", "12:00", "16:00", "20:00")
+
+x.axis.tick.seconds = as.vector(sapply(x.axis.tick.times,
+    function(time.string){
+        as.integer(as.POSIXct(paste("1970-01-01", time.string, sep = ''),
+                              "%Y-%m-%d %H:%M"))}))
+
+plot(x = daily.intervals.df[["interval.time.seconds"]],
+     y = daily.intervals.df[["average.steps"]],
+     type = "l", las = 1, xlab = "Time", ylab = "Average steps",
+     main = "Average Steps per 5-minute interval (ignoring NA's)",
+     xaxt = "n")
+
+axis(1, at = x.axis.tick.seconds, labels = x.axis.tick.times)
+```
+
+
+### Which 5-minute intervals has the highest average number of steps?
+
+```{r}
+argmax.interval.time.string = NA
+
+if (!is.na(argmax.interval)){
+    argmax.interval.time.string = convert.int__hh_mm(argmax.interval)
+}
+
+if (max.average.steps == -1){
+    max.average.steps.string = "      NA"
+} else {
+    max.average.steps.string = sprintf("%3.4f", max.average.steps)
+}
+
+cat(sprintf("%10s", argmax.interval.time.string),
+    " -- interval with the maximum average number of steps\n",
+    sprintf("%10s", max.average.steps.string),
+    " -- average number of steps in that interval\n", sep = '')
+```
 
 
 ## Imputing missing values
 
+### Total number of missing values
+
+```{r}
+cat(sum(is.na(data.df[["steps"]])), " : number of intervals with missing",
+    " data (namely the interval has NA for # of steps)\n", sep = '')
+```
+
+### Strategy for imputing missing values, and creating the new dataset.
+
+- We took the simplistic approach that if an interval was missing, we
+  would use the rounded average value of that interval across all the
+  days (as we computed before, omitting NA's)
+
+Code to impute missing values!
+
+```{r}
+round.5 = function(value){
+    return(trunc(value + 0.5))
+}
+
+
+imputed.data.df = data.df
+
+
+for (row.index in c(1:nrow(data.df))){
+    if (is.na(imputed.data.df[row.index, "steps"])){
+        current.interval = data.df[row.index, "interval"]
+        imputed.data.df[row.index, "steps"] =
+            round.5(hash.interval.to.average[[as.character(current.interval)]])
+    }
+}
+```
+
+### Histogram (with imputed values!)
+
+```{r}
+imputed.totals.v = c()
+
+for (current.date in dates.v){
+    ## Actually, since we imputed data, we don't need to do the !is.na
+    ## condition, but I include it for completeness.
+    current.data = subset(imputed.data.df,
+        (date == current.date) & (!is.na(steps)))
+    
+    if (nrow(current.data) > 0){
+        imputed.total    = sum(current.data[["steps"]], na.rm = TRUE)
+        imputed.totals.v = c(imputed.totals.v, imputed.total)
+    }
+}
+
+breaks.v = seq(from = 0, to = 22000, by = 1000)
+
+hist(imputed.totals.v, breaks = breaks.v,
+     main = "Histogram of IMPUTED daily total steps",
+     xlab = "Total daily steps",
+     ylab = "Number of Days", ylim = c(0, 20), las = 1)
+```
+
+Now we report the mean and median per day, with the imputed values.
+
+```{r}
+cat(sprintf("%0.5f", mean(imputed.totals.v)),
+    " : (Imputed) Mean daily total\n",
+    sprintf("%11i", median(imputed.totals.v)),
+    " : (Imputed) Median daily total\n", sep = '')
+```
+
+Comparing with the previous values (ignoring the NA's, and not
+imputing values), we see that the difference is rather minimal,
+precisely because we imputed the rounded averages of non-NA values to
+the NA values.  (The values are slightly different, because we rounded
+the average to the nearest integer).
+
+
+The daily totals obviously increased; in fact our data had no 'orphan'
+missing NA's.  (Namely all NA's were together in various days; if one
+interval in a day was missing, *every* interval in that day was
+missing).
+
+Hence the histogram of daily totals had a marked increase at the mean
+daily total (which was about 10766 in this data).
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r}
+library(lattice)
+day.of.week.v = weekdays(as.Date(imputed.data.df[["date"]]))
+
+imputed.data.df[["weekday.indicator"]] = as.vector(sapply(day.of.week.v,
+                   function(day.of.week){
+                       if (day.of.week %in% c("Saturday", "Sunday")){
+                           return("Weekend")
+                       } else {
+                           return("Weekday")}}))
+
+imputed.data.df[["weekday.indicator"]] =
+    as.factor(imputed.data.df[["weekday.indicator"]])
+
+
+
+xyplot(steps ~ interval|weekday.indicator, data = imputed.data.df,
+       type = c('a'), layout = c(1,2), ylim = c(-10,250),
+       xlab = 'Time',
+       main = "Average number of IMPUTED steps per 5 minute interval",
+       scales = list(x = list(
+                         at = c(400,800,1200,1600,2000),
+                         labels = c("04:00", "08:00", "12:00",
+                             "16:00", "20:00"))))
+```
+
+As we can see, there are rather marked differences in the exercise
+pattern, between weekdays and weekends.  For example, there is a
+marked peak around 8 am during the weekdays (due to a commute
+schedule?) that is not quite as dramatic during the weekends.
